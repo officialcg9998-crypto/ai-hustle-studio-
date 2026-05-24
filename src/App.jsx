@@ -1,891 +1,719 @@
-import { useState, useEffect } from "react";
-import { initializeApp } from "firebase/app";
-import {
-  getAuth,
-  onAuthStateChanged,
-  signInWithPopup,
-  GoogleAuthProvider,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  updateProfile,
-} from "firebase/auth";
+import { useState, useRef, useCallback, useEffect } from "react";
 
-// ─── FIREBASE CONFIG ─────────────────────────────────────────────
-const firebaseConfig = {
-  apiKey: "AIzaSyAWFBYl2eCR5m3JybMwe-WSjq74jemxMfw",
-  authDomain: "ai-hustle-studio.firebaseapp.com",
-  projectId: "ai-hustle-studio",
-  storageBucket: "ai-hustle-studio.firebasestorage.app",
-  messagingSenderId: "108144561022",
-  appId: "1:108144561022:web:11d78142fcae23dab4c12f",
-};
-const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
-const googleProvider = new GoogleAuthProvider();
-
-// ─── STRIPE CONFIG ───────────────────────────────────────────────
-const STRIPE_CONFIG = {
-  publishableKey: "YOUR_STRIPE_PUBLISHABLE_KEY",
-  prices: {
-    starter: "YOUR_STARTER_PRICE_ID",
-    pro: "YOUR_PRO_PRICE_ID",
-    unlimited: "YOUR_UNLIMITED_PRICE_ID",
-  },
-  successUrl: window.location.origin + "?session_id={CHECKOUT_SESSION_ID}&plan=",
-  cancelUrl: window.location.origin + "?canceled=true",
-};
-
-// ─── PLAN CONFIG ─────────────────────────────────────────────────
-const PLANS = [
-  {
-    id: "free", name: "Free", price: 0, priceLabel: "$0", period: "",
-    tagline: "Try before you buy", color: "#6b7280", accent: "#9ca3af",
-    gens: 5, tools: 2, stripePriceId: null,
-    features: ["5 generations / month", "2 tools unlocked", "Standard output quality", "Copy to clipboard"],
-    locked: ["Priority generation", "Export to PDF/DOC", "API access", "White-label rights"],
-    cta: "Start Free", badge: null,
-  },
-  {
-    id: "starter", name: "Starter", price: 19, priceLabel: "$19", period: "/mo",
-    tagline: "For side hustlers getting started", color: "#10b981", accent: "#34d399",
-    gens: 50, tools: 6, stripePriceId: STRIPE_CONFIG.prices.starter,
-    features: ["50 generations / month", "All 6 tools unlocked", "Standard output quality", "Copy to clipboard"],
-    locked: ["Priority generation", "Export to PDF/DOC", "API access", "White-label rights"],
-    cta: "Start Earning", badge: null,
-  },
-  {
-    id: "pro", name: "Pro", price: 49, priceLabel: "$49", period: "/mo",
-    tagline: "For serious income builders", color: "#f59e0b", accent: "#fbbf24",
-    gens: 300, tools: 6, stripePriceId: STRIPE_CONFIG.prices.pro,
-    features: ["300 generations / month", "All 6 tools unlocked", "Priority output quality", "Export to PDF / DOC"],
-    locked: ["API access", "White-label rights"],
-    cta: "Go Pro", badge: "MOST POPULAR",
-  },
-  {
-    id: "unlimited", name: "Unlimited", price: 99, priceLabel: "$99", period: "/mo",
-    tagline: "For agencies & power users", color: "#ef4444", accent: "#f87171",
-    gens: Infinity, tools: 6, stripePriceId: STRIPE_CONFIG.prices.unlimited,
-    features: ["Unlimited generations", "All 6 tools unlocked", "Priority output quality", "Export to PDF / DOC", "API access", "White-label rights"],
-    locked: [], cta: "Go Unlimited", badge: "BEST VALUE",
-  },
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const TABS = [
+  { id: "colorStyle", label: "Color & Style", icon: "🎨" },
+  { id: "media",      label: "Media",         icon: "🎬" },
+  { id: "aiTools",    label: "AI Tools",      icon: "🤖" },
+  { id: "plans",      label: "Plans",         icon: "💳" },
+  { id: "settings",   label: "Settings",      icon: "⚙️"  },
 ];
 
-const TOOLS = [
-  {
-    id: "product-desc", icon: "📦", label: "Product Descriptions", tag: "eCommerce", tagColor: "#f59e0b",
-    pitch: "SEO-optimized listings that sell — for Etsy, Amazon, Shopify.",
-    placeholder: "Describe your product (e.g. handmade lavender soy candle, 8oz, cotton wick)",
-    minPlan: "free",
-    systemPrompt: `You are an expert eCommerce copywriter. Generate a compelling, SEO-optimized product description. Include: a punchy headline, a 2-3 sentence hook, 4 bullet point features/benefits, and a closing CTA.`,
-    userPrompt: (i) => `Write a product description for: ${i}`,
-  },
-  {
-    id: "cold-email", icon: "✉️", label: "Cold Email Writer", tag: "Freelancing", tagColor: "#10b981",
-    pitch: "Win clients on autopilot with emails that actually get replies.",
-    placeholder: "Describe your service and target client (e.g. I do web design for local restaurants)",
-    minPlan: "free",
-    systemPrompt: `You are a cold email expert. Write a short, high-reply-rate cold email with: subject line, personalized opener, 1-2 sentence value prop, credibility signal, low-friction CTA. Under 120 words.`,
-    userPrompt: (i) => `Write a cold email for: ${i}`,
-  },
-  {
-    id: "youtube-hook", icon: "🎬", label: "YouTube Hook Generator", tag: "Creator Economy", tagColor: "#ef4444",
-    pitch: "5 viral hooks for any video topic using proven psychological triggers.",
-    placeholder: "Enter your video topic (e.g. how I made $5k in one month flipping furniture)",
-    minPlan: "starter",
-    systemPrompt: `You are a YouTube growth strategist. Generate 5 opening hooks using different psychological triggers (curiosity gap, bold claim, story, controversy, relatability). Number + label each. 1-3 sentences each.`,
-    userPrompt: (i) => `Generate YouTube hooks for: ${i}`,
-  },
-  {
-    id: "niche-ideas", icon: "💡", label: "Niche Business Finder", tag: "Entrepreneurship", tagColor: "#8b5cf6",
-    pitch: "Discover untapped micro-niches you can monetize in 30 days.",
-    placeholder: "Enter your skills or interests (e.g. I like fitness and I know Excel)",
-    minPlan: "starter",
-    systemPrompt: `You are a serial entrepreneur. Generate 5 specific micro-niche business ideas. For each: niche name, target customer, monetization method, estimated monthly revenue, one first step to start TODAY.`,
-    userPrompt: (i) => `Generate niche business ideas for: ${i}`,
-  },
-  {
-    id: "social-bio", icon: "🧲", label: "Social Media Bio", tag: "Personal Brand", tagColor: "#3b82f6",
-    pitch: "Magnetic bios for Instagram, Twitter/X, and LinkedIn.",
-    placeholder: "Tell me about yourself (e.g. fitness coach helping busy moms lose weight)",
-    minPlan: "starter",
-    systemPrompt: `You are a personal branding expert. Write 3 bios: Instagram (150 chars), Twitter/X (160 chars), LinkedIn (300 chars). Each: who you help, what transformation, CTA.`,
-    userPrompt: (i) => `Write social media bios for: ${i}`,
-  },
-  {
-    id: "pricing", icon: "💰", label: "Freelance Pricing Advisor", tag: "Freelancing", tagColor: "#10b981",
-    pitch: "Stop undercharging. Custom pricing strategy for your exact service.",
-    placeholder: "Describe your freelance service (e.g. I write blog posts for SaaS companies)",
-    minPlan: "starter",
-    systemPrompt: `You are a freelance business consultant. Provide: starter rate, mid-level rate, expert rate, a productized package with price, and one pricing psychology tip. Be specific with dollar amounts.`,
-    userPrompt: (i) => `Create a pricing strategy for: ${i}`,
-  },
+const BG_PRESETS = [
+  { id: "aurora", label: "Aurora", bg: "linear-gradient(135deg,#0f0c29,#302b63,#24243e)" },
+  { id: "slate",  label: "Slate",  bg: "linear-gradient(160deg,#1a1a2e,#16213e,#0f3460)" },
+  { id: "ember",  label: "Ember",  bg: "linear-gradient(135deg,#1a0505,#3d0000,#1a0a00)" },
+  { id: "ocean",  label: "Ocean",  bg: "linear-gradient(135deg,#001f3f,#003366,#004080)" },
+  { id: "forest", label: "Forest", bg: "linear-gradient(135deg,#052e16,#14532d,#064e3b)" },
+  { id: "rose",   label: "Rose",   bg: "linear-gradient(135deg,#1f0010,#4a0020,#2d0a1a)" },
+  { id: "gold",   label: "Gold",   bg: "linear-gradient(135deg,#1a1000,#3d2c00,#1a1500)" },
+  { id: "void",   label: "Void",   bg: "#050508" },
 ];
 
-const PLAN_ORDER = ["free", "starter", "pro", "unlimited"];
-function planIndex(id) { return PLAN_ORDER.indexOf(id); }
+const SWATCHES = ["#7c3aed","#2563eb","#0891b2","#059669","#d97706","#dc2626","#db2777","#f97316","#6d28d9","#334155","#e2e8f0","#ffffff"];
 
-async function redirectToStripeCheckout(plan) {
-  const paymentLinks = {
-    starter: "https://buy.stripe.com/eVqeVc6S13cX24b1Xg7wA00",
-    pro: "https://buy.stripe.com/4gM00i2BL4h16kr7hA7wA01",
-    unlimited: "https://buy.stripe.com/aFa9AS1xH00L9wD0Tc7wA02",
-  };
-  if (paymentLinks[plan.id]) {
-    window.location.href = paymentLinks[plan.id];
-  } else {
-    alert("Payment link not found for this plan.");
-  }
+const DEFAULT_SCHEME = {
+  bgMode: "preset", presetId: "aurora",
+  uploadedB64: null, uploadedName: null, isVideo: false,
+  bgOpacity: 100, bgBrightness: 85, bgSaturation: 100, bgBlur: 0, bgFit: "cover",
+  tabTintColor: "#302b63", tabOpacity: 75,
+  usePerApp: false,
+  perAppOpacity: Object.fromEntries(TABS.map(t=>[t.id,75])),
+};
+
+function hexToRgb(hex) {
+  if (!hex||hex.length<7) return "48,43,99";
+  return `${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)}`;
 }
 
-// ─── STYLES ──────────────────────────────────────────────────────
-const S = {
-  font: "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
-  bg: "#07070e",
-  card: "#0f0f1a",
-  border: "#1a1a2a",
-  text: "#e8e2d4",
-  muted: "#555",
-  gold: "#f59e0b",
-  red: "#ef4444",
-};
+// ─── STORAGE HELPERS (step 3 — persist across sessions) ──────────────────────
+const STORAGE_KEY = "ahs_bg_scheme_v1";
+const SCHEMES_KEY = "ahs_saved_schemes_v1";
 
-// ─── MAIN APP ────────────────────────────────────────────────────
+function loadScheme() {
+  try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
+}
+function saveSchemeToStorage(s) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {}
+}
+function loadSavedSchemes() {
+  try { const s = localStorage.getItem(SCHEMES_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
+}
+function saveSchemesToStorage(arr) {
+  // don't store base64 blobs to keep localStorage lean
+  try {
+    const slim = arr.map(s=>({...s, uploadedB64: null}));
+    localStorage.setItem(SCHEMES_KEY, JSON.stringify(slim));
+  } catch {}
+}
+
+// ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [showAuth, setShowAuth] = useState(false);
-  const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
+  const stored = loadScheme();
+  const init   = stored ? {...DEFAULT_SCHEME, ...stored, uploadedB64: null} : DEFAULT_SCHEME;
 
-  const [page, setPage] = useState("landing");
-  const [currentPlan, setCurrentPlan] = useState("free");
-  const [genCounts, setGenCounts] = useState({});
-  const [selected, setSelected] = useState(null);
-  const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [showUpgrade, setShowUpgrade] = useState(false);
-  const [upgradeReason, setUpgradeReason] = useState("");
-  const [checkoutLoading, setCheckoutLoading] = useState(null);
+  const [activeTab,     setActiveTab]     = useState("colorStyle");
+  const [bgMode,        setBgMode]        = useState(init.bgMode);
+  const [presetId,      setPresetId]      = useState(init.presetId);
+  const [uploadedB64,   setUploadedB64]   = useState(null);
+  const [uploadedName,  setUploadedName]  = useState(init.uploadedName);
+  const [isVideo,       setIsVideo]       = useState(false);
+  const [bgOpacity,     setBgOpacity]     = useState(init.bgOpacity);
+  const [bgBrightness,  setBgBrightness]  = useState(init.bgBrightness);
+  const [bgSaturation,  setBgSaturation]  = useState(init.bgSaturation);
+  const [bgBlur,        setBgBlur]        = useState(init.bgBlur);
+  const [bgFit,         setBgFit]         = useState(init.bgFit);
+  const [tabTintColor,  setTabTintColor]  = useState(init.tabTintColor);
+  const [tabOpacity,    setTabOpacity]    = useState(init.tabOpacity);
+  const [usePerApp,     setUsePerApp]     = useState(init.usePerApp);
+  const [perAppOpacity, setPerAppOpacity] = useState(init.perAppOpacity);
+  const [savedSchemes,  setSavedSchemes]  = useState(loadSavedSchemes);
+  const [toast,         setToast]         = useState(null);
+  const [dragOver,      setDragOver]      = useState(false);
+  const [unlocked,      setUnlocked]      = useState(false);
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const fileRef = useRef();
 
-  // Auth state listener
+  const preset   = BG_PRESETS.find(p=>p.id===presetId)||BG_PRESETS[0];
+  const rgb      = hexToRgb(tabTintColor);
+  const curTabOp = usePerApp ? perAppOpacity[activeTab] : tabOpacity;
+
+  // ── PERSIST active scheme whenever anything changes (step 3) ────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setAuthLoading(false);
-    });
-    return unsub;
+    saveSchemeToStorage({ bgMode, presetId, uploadedName, isVideo,
+      bgOpacity, bgBrightness, bgSaturation, bgBlur, bgFit,
+      tabTintColor, tabOpacity, usePerApp, perAppOpacity });
+  }, [bgMode,presetId,uploadedName,isVideo,bgOpacity,bgBrightness,bgSaturation,bgBlur,bgFit,
+      tabTintColor,tabOpacity,usePerApp,perAppOpacity]);
+
+  useEffect(() => { saveSchemesToStorage(savedSchemes); }, [savedSchemes]);
+
+  // ── FILE → BASE64 ───────────────────────────────────────────────────────────
+  const handleFile = useCallback((file) => {
+    if (!file) return;
+    const ok = ["image/jpeg","image/png","image/gif","image/webp","image/heic","image/heif","video/mp4","video/quicktime"];
+    if (!ok.includes(file.type)) { flash("⚠️ Use JPG, PNG, GIF, WebP, or MOV/MP4","error"); return; }
+    const vid = file.type.startsWith("video/");
+    setIsVideo(vid); setUploadedName(file.name);
+    const reader = new FileReader();
+    reader.onload = e => { setUploadedB64(e.target.result); setBgMode("upload"); flash(`✅ Background set: ${file.name}`,"success"); };
+    reader.readAsDataURL(file);
   }, []);
 
-  // Handle Stripe return
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const plan = params.get("plan");
-    const canceled = params.get("canceled");
-    if (plan && PLAN_ORDER.includes(plan)) {
-      setCurrentPlan(plan);
-      setPage("app");
-      window.history.replaceState({}, "", window.location.pathname);
+  const flash = (msg,type="info") => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
+
+  const removeUpload = () => { setUploadedB64(null); setUploadedName(null); setIsVideo(false); setBgMode("preset"); flash("Background removed.","info"); };
+
+  const applyScheme = (s) => {
+    setPresetId(s.presetId||"aurora"); setBgMode(s.bgMode||"preset");
+    setBgOpacity(s.bgOpacity??100); setBgBrightness(s.bgBrightness??85);
+    setBgSaturation(s.bgSaturation??100); setBgBlur(s.bgBlur??0); setBgFit(s.bgFit||"cover");
+    setTabTintColor(s.tabTintColor||"#302b63"); setTabOpacity(s.tabOpacity??75);
+    setUsePerApp(s.usePerApp||false); setPerAppOpacity(s.perAppOpacity||DEFAULT_SCHEME.perAppOpacity);
+    if (s.uploadedB64) { setUploadedB64(s.uploadedB64); setUploadedName(s.uploadedName); }
+    flash(`✅ Applied: ${s.label}`,"success");
+  };
+
+  const saveCurrentScheme = () => {
+    if (!unlocked && savedSchemes.length >= 3) { setShowUnlockModal(true); return; }
+    const s = { id:Date.now(), label:`Scheme ${savedSchemes.length+1}`,
+      bgMode, presetId, uploadedB64, uploadedName, isVideo,
+      bgOpacity, bgBrightness, bgSaturation, bgBlur, bgFit,
+      tabTintColor, tabOpacity, usePerApp, perAppOpacity };
+    setSavedSchemes(p=>[...p,s]);
+    flash("💾 Scheme saved!","success");
+  };
+
+  // ── TAB STYLE ────────────────────────────────────────────────────────────────
+  const tabStyle = (id, size="md") => {
+    const active = id===activeTab;
+    const op = usePerApp ? perAppOpacity[id]/100 : tabOpacity/100;
+    const pad = size==="sm" ? "5px 12px" : "8px 18px";
+    return {
+      padding:pad, borderRadius:9, cursor:"pointer", fontFamily:"inherit",
+      fontSize: size==="sm"?12:13, fontWeight:600,
+      background:`rgba(${rgb},${op})`,
+      border:`1.5px solid ${active?tabTintColor:`rgba(${rgb},0.45)`}`,
+      color: active?"#fff":"rgba(255,255,255,0.6)",
+      backdropFilter:"blur(12px)", transition:"all .2s",
+      boxShadow: active?`0 0 16px ${tabTintColor}55`:"none",
+    };
+  };
+
+  // ── BG FILTER ────────────────────────────────────────────────────────────────
+  const bgFilter = `brightness(${bgBrightness}%) saturate(${bgSaturation}%)${bgBlur>0?` blur(${bgBlur}px)`:""}`;
+
+  // ── BACKGROUND LAYER ─────────────────────────────────────────────────────────
+  const BgLayer = () => {
+    if (bgMode==="upload" && uploadedB64) {
+      if (isVideo) return (
+        <video src={uploadedB64} autoPlay loop muted playsInline
+          style={{position:"absolute",inset:0,width:"100%",height:"100%",
+            objectFit:bgFit==="contain"?"contain":"cover",opacity:bgOpacity/100,filter:bgFilter}}/>
+      );
+      return <div style={{position:"absolute",inset:0,
+        backgroundImage:`url("${uploadedB64}")`,
+        backgroundSize:bgFit==="tile"?"300px 300px":bgFit,
+        backgroundPosition:"center",backgroundRepeat:bgFit==="tile"?"repeat":"no-repeat",
+        opacity:bgOpacity/100,filter:bgFilter}}/>;
     }
-    if (canceled) {
-      setPage("pricing");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, []);
-
-  const handleSignOut = async () => {
-    await signOut(auth);
-    setPage("landing");
-    setCurrentPlan("free");
-    setSelected(null);
+    return <div style={{position:"absolute",inset:0,background:preset.bg,filter:bgFilter}}/>;
   };
 
-  const plan = PLANS.find(p => p.id === currentPlan);
-  const usedGens = genCounts[currentPlan] || 0;
-  const gensLeft = plan.gens === Infinity ? "∞" : Math.max(0, plan.gens - usedGens);
-  const hasGens = plan.gens === Infinity || usedGens < plan.gens;
-  const canUseTool = (tool) => planIndex(currentPlan) >= planIndex(tool.minPlan);
-
-  const handleSelectTool = (tool) => {
-    if (!user) { setAuthMode("signin"); setShowAuth(true); return; }
-    if (!canUseTool(tool)) { setUpgradeReason(`The ${tool.label} tool requires the Starter plan or above.`); setShowUpgrade(true); return; }
-    if (!hasGens) { setUpgradeReason(`You've used all ${plan.gens} generations on the ${plan.name} plan.`); setShowUpgrade(true); return; }
-    setSelected(tool); setInput(""); setOutput("");
-  };
-
-  const handleGenerate = async () => {
-    if (!input.trim() || !hasGens) return;
-    setLoading(true); setOutput("");
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: selected.systemPrompt,
-          messages: [{ role: "user", content: selected.userPrompt(input) }],
-        }),
-      });
-      const data = await res.json();
-      const text = data.content?.map(b => b.text || "").join("\n") || "No response.";
-      setOutput(text);
-      setGenCounts(prev => ({ ...prev, [currentPlan]: (prev[currentPlan] || 0) + 1 }));
-    } catch (e) {
-      setOutput("Error generating. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSelectPlan = async (planId) => {
-    if (!user) { setAuthMode("signup"); setShowAuth(true); return; }
-    const selectedPlan = PLANS.find(p => p.id === planId);
-    if (planId === "free") { setCurrentPlan("free"); setShowUpgrade(false); setPage("app"); return; }
-    setCheckoutLoading(planId);
-    await redirectToStripeCheckout(selectedPlan);
-    setCheckoutLoading(null);
-  };
-
-  if (authLoading) return (
-    <div style={{ minHeight: "100vh", background: S.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ color: S.gold, fontFamily: S.font, fontSize: 14, letterSpacing: "0.1em" }}>Loading...</div>
-    </div>
-  );
-
+  // ── RENDER ───────────────────────────────────────────────────────────────────
   return (
-    <>
-      {showAuth && (
-        <AuthModal
-          mode={authMode}
-          onClose={() => setShowAuth(false)}
-          onSwitch={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
-          onSuccess={() => { setShowAuth(false); setPage("app"); }}
-        />
-      )}
-      {page === "landing" && (
-        <Landing
-          user={user}
-          onStart={() => setPage("pricing")}
-          onFree={() => { if (!user) { setAuthMode("signup"); setShowAuth(true); } else { setCurrentPlan("free"); setPage("app"); } }}
-          onSignIn={() => { setAuthMode("signin"); setShowAuth(true); }}
-          onSignOut={handleSignOut}
-          onApp={() => setPage("app")}
-        />
-      )}
-      {page === "pricing" && (
-        <PricingPage
-          plans={PLANS} onSelect={handleSelectPlan}
-          onBack={() => setPage("landing")} checkoutLoading={checkoutLoading}
-          user={user} onSignIn={() => { setAuthMode("signin"); setShowAuth(true); }}
-        />
-      )}
-      {page === "app" && (
-        <AppShell plan={plan} gensLeft={gensLeft} onPricing={() => setPage("pricing")} user={user} onSignOut={handleSignOut}>
-          {showUpgrade && (
-            <UpgradeModal reason={upgradeReason} plans={PLANS} currentPlan={currentPlan}
-              onSelect={handleSelectPlan} onClose={() => setShowUpgrade(false)} checkoutLoading={checkoutLoading} />
-          )}
-          {!selected ? (
-            <ToolGrid tools={TOOLS} currentPlan={currentPlan} canUseTool={canUseTool} onSelect={handleSelectTool} />
-          ) : (
-            <ToolView tool={selected} input={input} setInput={setInput} output={output} loading={loading}
-              onGenerate={handleGenerate} onBack={() => { setSelected(null); setOutput(""); setInput(""); }}
-              plan={plan} gensLeft={gensLeft}
-              onUpgrade={() => { setUpgradeReason("Upgrade for more generations and features."); setShowUpgrade(true); }} />
-          )}
-          <SetupGuide />
-        </AppShell>
-      )}
-    </>
-  );
-}
+    <div style={{fontFamily:"'Syne','DM Sans',sans-serif",minHeight:"100vh",
+      background:"#040408",color:"#e2e8f0",position:"relative",overflow:"hidden"}}>
 
-// ─── AUTH MODAL ──────────────────────────────────────────────────
-function AuthModal({ mode, onClose, onSwitch, onSuccess }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const isSignUp = mode === "signup";
-
-  const handleGoogle = async () => {
-    setLoading(true); setError("");
-    try {
-      await signInWithPopup(auth, googleProvider);
-      onSuccess();
-    } catch (e) {
-      setError(e.message.replace("Firebase: ", "").replace(/ \(auth\/.*\)\.?/, ""));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEmail = async () => {
-    if (!email || !password) { setError("Please fill in all fields."); return; }
-    setLoading(true); setError("");
-    try {
-      if (isSignUp) {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        if (name) await updateProfile(cred.user, { displayName: name });
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-      }
-      onSuccess();
-    } catch (e) {
-      const msg = e.code === "auth/email-already-in-use" ? "An account with this email already exists."
-        : e.code === "auth/wrong-password" ? "Incorrect password."
-        : e.code === "auth/user-not-found" ? "No account found with this email."
-        : e.code === "auth/weak-password" ? "Password must be at least 6 characters."
-        : e.code === "auth/invalid-email" ? "Please enter a valid email address."
-        : "Something went wrong. Please try again.";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)",
-      zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-    }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{
-        background: "#0d0d1a", border: "1px solid #f59e0b33",
-        borderRadius: 24, padding: "36px 32px", maxWidth: 420, width: "100%",
-        fontFamily: S.font, animation: "authPop 0.25s ease",
-      }}>
-        {/* Header */}
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{
-            width: 44, height: 44, borderRadius: 12,
-            background: "linear-gradient(135deg, #f59e0b, #ef4444)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: "bold", fontSize: 20, color: "#000", margin: "0 auto 16px",
-          }}>$</div>
-          <h2 style={{ margin: "0 0 6px", color: "#fff", fontSize: 22, fontWeight: "normal" }}>
-            {isSignUp ? "Create your account" : "Welcome back"}
-          </h2>
-          <p style={{ color: S.muted, fontSize: 13, margin: 0 }}>
-            {isSignUp ? "Start your 7-day free trial — no card required" : "Sign in to AI Hustle Studio"}
-          </p>
-        </div>
-
-        {/* Google Button */}
-        <button onClick={handleGoogle} disabled={loading} style={{
-          width: "100%", background: "#fff", color: "#111",
-          border: "none", borderRadius: 12, padding: "13px",
-          fontSize: 14, fontWeight: "bold", cursor: loading ? "not-allowed" : "pointer",
-          fontFamily: S.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          marginBottom: 18, transition: "opacity 0.2s", opacity: loading ? 0.7 : 1,
-        }}>
-          <svg width="18" height="18" viewBox="0 0 18 18">
-            <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
-            <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-            <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/>
-            <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/>
-          </svg>
-          Continue with Google
-        </button>
-
-        {/* Divider */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
-          <div style={{ flex: 1, height: 1, background: "#1a1a2a" }} />
-          <span style={{ color: "#333", fontSize: 12 }}>or</span>
-          <div style={{ flex: 1, height: 1, background: "#1a1a2a" }} />
-        </div>
-
-        {/* Email Form */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {isSignUp && (
-            <input
-              type="text" placeholder="Your name (optional)" value={name}
-              onChange={e => setName(e.target.value)}
-              style={inputStyle}
-              onFocus={e => e.target.style.border = "1px solid #f59e0b55"}
-              onBlur={e => e.target.style.border = "1px solid #1e1e30"}
-            />
-          )}
-          <input
-            type="email" placeholder="Email address" value={email}
-            onChange={e => setEmail(e.target.value)}
-            style={inputStyle}
-            onFocus={e => e.target.style.border = "1px solid #f59e0b55"}
-            onBlur={e => e.target.style.border = "1px solid #1e1e30"}
-          />
-          <input
-            type="password" placeholder="Password" value={password}
-            onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleEmail()}
-            style={inputStyle}
-            onFocus={e => e.target.style.border = "1px solid #f59e0b55"}
-            onBlur={e => e.target.style.border = "1px solid #1e1e30"}
-          />
-        </div>
-
-        {error && (
-          <div style={{
-            marginTop: 12, padding: "10px 14px", background: "#ef444415",
-            border: "1px solid #ef444433", borderRadius: 10,
-            color: "#ef4444", fontSize: 12, lineHeight: 1.5,
-          }}>{error}</div>
-        )}
-
-        <button onClick={handleEmail} disabled={loading} style={{
-          width: "100%", marginTop: 14,
-          background: loading ? "#151520" : "linear-gradient(135deg, #f59e0b, #ef4444)",
-          color: loading ? "#333" : "#000",
-          border: "none", borderRadius: 12, padding: "13px",
-          fontSize: 14, fontWeight: "bold", cursor: loading ? "not-allowed" : "pointer",
-          fontFamily: S.font, transition: "all 0.2s",
-        }}>
-          {loading ? "Please wait..." : isSignUp ? "Create Account →" : "Sign In →"}
-        </button>
-
-        <div style={{ textAlign: "center", marginTop: 18 }}>
-          <span style={{ color: S.muted, fontSize: 13 }}>
-            {isSignUp ? "Already have an account? " : "Don't have an account? "}
-          </span>
-          <button onClick={onSwitch} style={{
-            background: "none", border: "none", color: S.gold,
-            fontSize: 13, cursor: "pointer", fontFamily: S.font, padding: 0,
-          }}>
-            {isSignUp ? "Sign in" : "Sign up free"}
-          </button>
-        </div>
-
-        <button onClick={onClose} style={{
-          position: "absolute", display: "block", margin: "12px auto 0",
-          width: "100%", background: "none", border: "none",
-          color: "#333", fontSize: 12, cursor: "pointer", fontFamily: S.font,
-        }}>Close</button>
+      {/* LIVE BG */}
+      <div style={{position:"fixed",inset:0,zIndex:0,overflow:"hidden"}}>
+        <BgLayer/>
+        <div style={{position:"absolute",inset:0,background:"rgba(2,2,10,0.45)"}}/>
       </div>
-      <style>{`@keyframes authPop { from { opacity:0; transform:scale(0.96) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }`}</style>
+
+      <div style={{position:"relative",zIndex:1}}>
+
+        {/* ── NAV ── */}
+        <nav style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+          padding:"14px 24px",borderBottom:`1px solid ${tabTintColor}22`,
+          background:`rgba(${rgb},${tabOpacity/100})`,backdropFilter:"blur(16px)"}}>
+          <div style={{fontWeight:800,fontSize:18,background:`linear-gradient(135deg,#fff,${tabTintColor})`,
+            WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
+            AI Hustle Studio
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {TABS.map(t=>(
+              <button key={t.id} onClick={()=>setActiveTab(t.id)} style={tabStyle(t.id,"sm")}>
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{padding:"6px 14px",borderRadius:8,background:"transparent",
+              border:`1px solid ${tabTintColor}55`,color:"#94a3b8",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>Sign In</button>
+            <button style={{padding:"6px 14px",borderRadius:8,
+              background:`linear-gradient(135deg,${tabTintColor},${tabTintColor}bb)`,
+              border:"none",color:"#fff",cursor:"pointer",fontSize:12,fontFamily:"inherit",fontWeight:700,
+              boxShadow:`0 0 12px ${tabTintColor}44`}}>Free Trial</button>
+          </div>
+        </nav>
+
+        {/* ── TAB CONTENT ── */}
+        <div style={{maxWidth:1100,margin:"0 auto",padding:"28px 18px 80px"}}>
+
+          {activeTab==="colorStyle" && <ColorStyleTab {...{tabTintColor,tabOpacity,rgb,curTabOp,bgMode,presetId,setPresetId,
+            uploadedB64,uploadedName,isVideo,bgOpacity,setBgOpacity,bgBrightness,setBgBrightness,
+            bgSaturation,setBgSaturation,bgBlur,setBgBlur,bgFit,setBgFit,setBgMode,
+            tabTintColor,setTabTintColor,tabOpacity,setTabOpacity,usePerApp,setUsePerApp,
+            perAppOpacity,setPerAppOpacity,handleFile,removeUpload,dragOver,setDragOver,fileRef,
+            savedSchemes,setSavedSchemes,saveCurrentScheme,applyScheme,unlocked,setShowUnlockModal,flash,BG_PRESETS}}/>}
+
+          {activeTab==="media"      && <MediaTab tint={tabTintColor} rgb={rgb} op={curTabOp}/>}
+          {activeTab==="aiTools"    && <AIToolsTab tint={tabTintColor} rgb={rgb} op={curTabOp}/>}
+          {activeTab==="plans"      && <PlansTab tint={tabTintColor} rgb={rgb} op={curTabOp}/>}
+          {activeTab==="settings"   && <SettingsTab {...{tabTintColor,tabOpacity,rgb,curTabOp,bgMode,presetId,setPresetId,
+            uploadedB64,uploadedName,isVideo,bgOpacity,setBgOpacity,bgBrightness,setBgBrightness,
+            bgSaturation,setBgSaturation,bgBlur,setBgBlur,bgFit,setBgFit,setBgMode,
+            tabTintColor,setTabTintColor,tabOpacity,setTabOpacity,usePerApp,setUsePerApp,
+            perAppOpacity,setPerAppOpacity,handleFile,removeUpload,dragOver,setDragOver,fileRef,
+            savedSchemes,setSavedSchemes,saveCurrentScheme,applyScheme,unlocked,setUnlocked,setShowUnlockModal,flash,BG_PRESETS}}/>}
+        </div>
+      </div>
+
+      {/* UNLOCK MODAL */}
+      {showUnlockModal && (
+        <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.7)",
+          backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center"}}
+          onClick={()=>setShowUnlockModal(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e0e1e",border:`1px solid ${tabTintColor}44`,
+            borderRadius:18,padding:"32px 28px",maxWidth:360,width:"90%",textAlign:"center",
+            boxShadow:`0 24px 60px rgba(0,0,0,0.6)`}}>
+            <div style={{fontSize:36,marginBottom:12}}>🔓</div>
+            <h2 style={{margin:"0 0 8px",fontSize:22,fontWeight:800}}>Unlock Unlimited Schemes</h2>
+            <p style={{color:"#94a3b8",fontSize:14,marginBottom:20}}>
+              Save unlimited background schemes, tint colors & visibility settings — permanently.
+            </p>
+            <div style={{fontSize:32,fontWeight:800,color:tabTintColor,marginBottom:20}}>$7 <span style={{fontSize:14,color:"#64748b",fontWeight:400}}>one-time</span></div>
+            <button onClick={()=>{setUnlocked(true);setShowUnlockModal(false);flash("🎉 Unlocked! Unlimited schemes active.","success");}}
+              style={{width:"100%",padding:"12px 0",borderRadius:10,
+                background:`linear-gradient(135deg,${tabTintColor},#4f46e5)`,
+                border:"none",color:"#fff",fontSize:16,fontFamily:"inherit",fontWeight:800,cursor:"pointer",
+                boxShadow:`0 4px 20px ${tabTintColor}55`,marginBottom:10}}>
+              Unlock for $7
+            </button>
+            <button onClick={()=>setShowUnlockModal(false)}
+              style={{background:"transparent",border:"none",color:"#475569",cursor:"pointer",fontSize:13,fontFamily:"inherit"}}>
+              Maybe later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST */}
+      {toast && (
+        <div style={{position:"fixed",bottom:22,left:"50%",transform:"translateX(-50%)",zIndex:200,
+          padding:"11px 22px",borderRadius:12,fontWeight:600,fontSize:14,color:"#fff",whiteSpace:"nowrap",
+          background:toast.type==="error"?"rgba(239,68,68,0.93)":toast.type==="success"?"rgba(34,197,94,0.93)":"rgba(96,165,250,0.93)",
+          backdropFilter:"blur(10px)",boxShadow:"0 8px 24px rgba(0,0,0,0.4)",animation:"fadeIn .2s ease"}}>
+          {toast.msg}
+        </div>
+      )}
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&display=swap');
+        *{box-sizing:border-box;}
+        body{margin:0;}
+        ::-webkit-scrollbar{width:5px;background:#040408;}
+        ::-webkit-scrollbar-thumb{background:#2d2d4e;border-radius:3px;}
+        @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+        input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;outline:none;cursor:pointer;}
+        input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+          background:var(--tc,#a78bfa);border:2px solid #fff;cursor:pointer;box-shadow:0 0 6px var(--tc,#a78bfa)55;}
+        select option{background:#12122a;}
+      `}</style>
     </div>
   );
 }
 
-const inputStyle = {
-  width: "100%", background: "#080812", border: "1px solid #1e1e30",
-  borderRadius: 12, padding: "13px 14px", color: "#e8e2d4", fontSize: 14,
-  outline: "none", fontFamily: S.font, boxSizing: "border-box", transition: "border 0.2s",
-};
+// ─── SHARED BACKGROUND CUSTOMIZER (used in both ColorStyle + Settings) ────────
+function BgCustomizer({ tint, rgb, op, bgMode, presetId, setPresetId, uploadedB64, uploadedName,
+  isVideo, bgOpacity, setBgOpacity, bgBrightness, setBgBrightness, bgSaturation, setBgSaturation,
+  bgBlur, setBgBlur, bgFit, setBgFit, setBgMode, tabTintColor, setTabTintColor,
+  tabOpacity, setTabOpacity, usePerApp, setUsePerApp, perAppOpacity, setPerAppOpacity,
+  handleFile, removeUpload, dragOver, setDragOver, fileRef,
+  savedSchemes, setSavedSchemes, saveCurrentScheme, applyScheme, unlocked, setShowUnlockModal, BG_PRESETS }) {
 
-// ─── LANDING ─────────────────────────────────────────────────────
-function Landing({ user, onStart, onFree, onSignIn, onSignOut, onApp }) {
+  const inlineFileRef = fileRef;
+
   return (
-    <div style={{ minHeight: "100vh", background: S.bg, fontFamily: S.font, color: S.text }}>
-      {/* Nav */}
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        padding: "18px 32px", borderBottom: "1px solid #111118",
-        position: "sticky", top: 0, background: "#09090f", zIndex: 50,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: 7,
-            background: "linear-gradient(135deg, #f59e0b, #ef4444)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: "bold", fontSize: 15, color: "#000",
-          }}>$</div>
-          <span style={{ fontSize: 15, fontWeight: "bold", color: "#fff", letterSpacing: "0.04em" }}>AI HUSTLE STUDIO</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {user ? (
-            <>
-              <span style={{ color: S.muted, fontSize: 13 }}>
-                {user.displayName || user.email?.split("@")[0]}
-              </span>
-              <button onClick={onApp} style={navBtnStyle("#f59e0b")}>Open App →</button>
-              <button onClick={onSignOut} style={navBtnStyle("#333")}>Sign Out</button>
-            </>
-          ) : (
-            <>
-              <button onClick={onSignIn} style={navBtnStyle("#555")}>Sign In</button>
-              <button onClick={onStart} style={navBtnStyle("#f59e0b")}>Get Started →</button>
-            </>
-          )}
-        </div>
-      </div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
 
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "70px 24px 80px", textAlign: "center" }}>
-        <span style={{
-          display: "inline-block", border: "1px solid #f59e0b44", color: "#f59e0b",
-          fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase",
-          padding: "5px 16px", borderRadius: 30, background: "#f59e0b0a", marginBottom: 40,
-        }}>AI-Powered · Income Generating · Stripe Payments</span>
+      {/* LEFT */}
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
 
-        <h1 style={{ fontSize: "clamp(36px,6vw,68px)", fontWeight: "normal", lineHeight: 1.15, marginBottom: 24 }}>
-          The AI that works<br />
-          <span style={{ background: "linear-gradient(90deg, #f59e0b, #ef4444)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            while you sleep
-          </span>
-        </h1>
-
-        <p style={{ color: "#888", fontSize: 17, lineHeight: 1.7, maxWidth: 500, margin: "0 auto 48px" }}>
-          Six AI-powered income tools. Real Stripe payments. Start free, scale to $99/mo. Built to generate revenue from day one.
-        </p>
-
-        <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
-          <button onClick={onStart} style={{
-            background: "linear-gradient(135deg, #f59e0b, #ef4444)",
-            color: "#000", border: "none", borderRadius: 12,
-            padding: "16px 36px", fontSize: 16, cursor: "pointer",
-            fontFamily: S.font, fontWeight: "bold", letterSpacing: "0.04em",
-            boxShadow: "0 8px 32px rgba(245,158,11,0.25)",
-          }}>View Pricing & Subscribe →</button>
-          <button onClick={onFree} style={{
-            background: "transparent", color: "#777",
-            border: "1px solid #2a2a3a", borderRadius: 12,
-            padding: "16px 28px", fontSize: 15, cursor: "pointer", fontFamily: S.font,
-          }}>Try Free (5 generations)</button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 18, marginTop: 72 }}>
-          {[
-            { icon: "💳", title: "Stripe Payments", desc: "Secure recurring billing" },
-            { icon: "⚡", title: "Instant output", desc: "Results in under 10 seconds" },
-            { icon: "🔒", title: "No lock-in", desc: "Cancel anytime" },
-            { icon: "💸", title: "Pays for itself", desc: "One client = months of sub" },
-          ].map(f => (
-            <div key={f.title} style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 16, padding: "22px 18px" }}>
-              <div style={{ fontSize: 26, marginBottom: 10 }}>{f.icon}</div>
-              <div style={{ fontWeight: "bold", color: S.text, marginBottom: 6, fontSize: 14 }}>{f.title}</div>
-              <div style={{ color: "#555", fontSize: 12 }}>{f.desc}</div>
+        {/* Source */}
+        <Panel tint={tint} title="🖼️ Background Source">
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            {["preset","upload"].map(m=>(
+              <Pill key={m} active={bgMode===m} tint={tint} onClick={()=>setBgMode(m)}>
+                {m==="preset"?"🎨 Presets":"📁 Upload"}
+              </Pill>
+            ))}
+          </div>
+          {bgMode==="preset" ? (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7}}>
+              {BG_PRESETS.map(p=>(
+                <button key={p.id} onClick={()=>setPresetId(p.id)} style={{
+                  height:40,borderRadius:8,cursor:"pointer",background:p.bg,fontFamily:"inherit",
+                  border:`2px solid ${presetId===p.id?tint:"transparent"}`,fontSize:11,color:"#fff",fontWeight:700,
+                  boxShadow:presetId===p.id?`0 0 0 3px ${tint}44`:"none",transition:"all .2s"}}>
+                  {p.label}
+                </button>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function navBtnStyle(color) {
-  return {
-    background: "transparent", border: `1px solid ${color}44`, color,
-    borderRadius: 8, padding: "7px 16px", fontSize: 12, cursor: "pointer",
-    fontFamily: S.font, fontWeight: "bold",
-  };
-}
-
-// ─── PRICING PAGE ────────────────────────────────────────────────
-function PricingPage({ plans, onSelect, onBack, checkoutLoading, user, onSignIn }) {
-  return (
-    <div style={{ minHeight: "100vh", background: S.bg, fontFamily: S.font, color: S.text, padding: "48px 20px 80px" }}>
-      <div style={{ maxWidth: 1020, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 36 }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "#555", fontSize: 13, cursor: "pointer", fontFamily: S.font }}>← Back</button>
-          {!user && (
-            <button onClick={onSignIn} style={navBtnStyle("#f59e0b")}>Sign In</button>
-          )}
-        </div>
-
-        <div style={{ textAlign: "center", marginBottom: 52 }}>
-          <h1 style={{ fontSize: "clamp(28px,4vw,44px)", fontWeight: "normal", marginBottom: 12 }}>Simple, honest pricing</h1>
-          <p style={{ color: "#666", fontSize: 15 }}>Payments powered by Stripe · Cancel anytime · No hidden fees</p>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: 20 }}>
-          {plans.map(plan => <PlanCard key={plan.id} plan={plan} onSelect={onSelect} checkoutLoading={checkoutLoading} />)}
-        </div>
-
-        <div style={{ marginTop: 40, background: S.card, border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 28px", textAlign: "center" }}>
-          <p style={{ color: "#555", fontSize: 13, margin: 0 }}>
-            🔒 Payments are processed securely by <strong style={{ color: S.gold }}>Stripe</strong>.
-            We never store your card details.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({ plan, onSelect, checkoutLoading }) {
-  const [hover, setHover] = useState(false);
-  const isLoading = checkoutLoading === plan.id;
-  const isPopular = plan.badge === "MOST POPULAR";
-  const isBest = plan.badge === "BEST VALUE";
-
-  return (
-    <div
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        background: hover ? "#13131f" : S.card,
-        border: `1px solid ${hover || isPopular ? plan.color + "55" : S.border}`,
-        borderRadius: 20, padding: "28px 22px", position: "relative",
-        transition: "all 0.2s", transform: hover ? "translateY(-4px)" : "none",
-        boxShadow: isPopular ? `0 0 40px ${plan.color}18` : "none",
-      }}
-    >
-      {plan.badge && (
-        <div style={{
-          position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)",
-          background: `linear-gradient(90deg, ${plan.color}, ${plan.accent})`,
-          color: "#000", fontSize: 10, fontWeight: "bold",
-          letterSpacing: "0.12em", padding: "4px 14px", borderRadius: 20, whiteSpace: "nowrap",
-        }}>{plan.badge}</div>
-      )}
-      <div style={{ color: plan.color, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10 }}>{plan.name}</div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ fontSize: 38, fontWeight: "bold", color: "#fff" }}>{plan.priceLabel}</span>
-        <span style={{ color: "#555", fontSize: 14 }}>{plan.period}</span>
-      </div>
-      <div style={{ color: "#555", fontSize: 12, marginBottom: 22 }}>{plan.tagline}</div>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: plan.color, fontWeight: "bold", marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${S.border}` }}>
-          {plan.gens === Infinity ? "Unlimited" : plan.gens} generations · {plan.tools} tools
-        </div>
-        {plan.features.map(f => (
-          <div key={f} style={{ display: "flex", gap: 8, marginBottom: 7 }}>
-            <span style={{ color: plan.color, fontSize: 12 }}>✓</span>
-            <span style={{ color: "#aaa", fontSize: 12 }}>{f}</span>
-          </div>
-        ))}
-        {plan.locked.map(f => (
-          <div key={f} style={{ display: "flex", gap: 8, marginBottom: 7 }}>
-            <span style={{ color: "#2a2a3a", fontSize: 12 }}>✗</span>
-            <span style={{ color: "#333", fontSize: 12 }}>{f}</span>
-          </div>
-        ))}
-      </div>
-      <button onClick={() => onSelect(plan.id)} disabled={isLoading} style={{
-        width: "100%",
-        background: isLoading ? "#1a1a2a" : (isPopular || isBest) ? `linear-gradient(135deg, ${plan.color}, ${plan.accent})` : "transparent",
-        color: isLoading ? "#444" : (isPopular || isBest) ? "#000" : plan.color,
-        border: `1px solid ${plan.color}55`, borderRadius: 10,
-        padding: "12px", fontSize: 13, fontWeight: "bold",
-        cursor: isLoading ? "not-allowed" : "pointer",
-        fontFamily: S.font, letterSpacing: "0.04em", transition: "all 0.2s",
-      }}>
-        {isLoading ? "Redirecting to Stripe..." : plan.id === "free" ? plan.cta : `💳 ${plan.cta}`}
-      </button>
-    </div>
-  );
-}
-
-// ─── APP SHELL ───────────────────────────────────────────────────
-function AppShell({ plan, gensLeft, onPricing, user, onSignOut, children }) {
-  return (
-    <div style={{ minHeight: "100vh", background: S.bg, fontFamily: S.font, color: S.text }}>
-      <div style={{
-        borderBottom: `1px solid #141420`, padding: "14px 28px",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: "#09090f", position: "sticky", top: 0, zIndex: 50,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: 7,
-            background: "linear-gradient(135deg, #f59e0b, #ef4444)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: "bold", fontSize: 15, color: "#000",
-          }}>$</div>
-          <span style={{ fontSize: 15, fontWeight: "bold", color: "#fff", letterSpacing: "0.04em" }}>AI HUSTLE STUDIO</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ fontSize: 12, color: "#555" }}>
-            <span style={{ color: plan.color }}>{gensLeft}</span>
-            {plan.gens !== Infinity && <span> gens left</span>}
-          </div>
-          <div style={{
-            fontSize: 10, padding: "3px 10px", borderRadius: 20,
-            border: `1px solid ${plan.color}44`, color: plan.color,
-            textTransform: "uppercase", letterSpacing: "0.1em",
-          }}>{plan.name}</div>
-          <button onClick={onPricing} style={{
-            background: "linear-gradient(90deg,#f59e0b,#ef4444)", color: "#000",
-            border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 11,
-            cursor: "pointer", fontFamily: S.font, fontWeight: "bold",
-          }}>💳 Upgrade</button>
-          {user && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {user.photoURL ? (
-                <img src={user.photoURL} alt="" style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${S.border}` }} />
-              ) : (
-                <div style={{
-                  width: 28, height: 28, borderRadius: "50%",
-                  background: "linear-gradient(135deg, #f59e0b, #ef4444)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 12, fontWeight: "bold", color: "#000",
-                }}>
-                  {(user.displayName || user.email || "U")[0].toUpperCase()}
+          ):(
+            <>
+              <div onClick={()=>inlineFileRef.current?.click()}
+                onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+                onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+                onDragLeave={()=>setDragOver(false)}
+                style={{border:`2px dashed ${dragOver?tint:"#2d2d4e"}`,borderRadius:12,
+                  padding:"18px 14px",textAlign:"center",cursor:"pointer",
+                  background:dragOver?`${tint}14`:"rgba(255,255,255,0.02)",transition:"all .2s"}}>
+                <div style={{fontSize:28,marginBottom:4}}>📸</div>
+                <div style={{fontSize:13,color:"#94a3b8"}}>Tap or drop photo / GIF / video</div>
+                <div style={{fontSize:11,color:"#475569",marginTop:3}}>JPG · PNG · GIF · WebP · MP4 · MOV</div>
+              </div>
+              <input ref={inlineFileRef} type="file" accept="image/*,video/mp4,video/quicktime"
+                onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+              {uploadedB64 && !isVideo && (
+                <div style={{marginTop:8,borderRadius:9,overflow:"hidden",height:80,
+                  border:`1.5px solid ${tint}44`,position:"relative"}}>
+                  <img src={uploadedB64} alt="bg" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                  <div style={{position:"absolute",inset:0,background:"linear-gradient(to top,rgba(0,0,0,0.55),transparent)",
+                    display:"flex",alignItems:"flex-end",padding:"5px 8px"}}>
+                    <span style={{fontSize:11,color:"#fff",fontWeight:600}}>{uploadedName}</span>
+                  </div>
                 </div>
               )}
-              <button onClick={onSignOut} style={{
-                background: "none", border: "none", color: "#444",
-                fontSize: 11, cursor: "pointer", fontFamily: S.font,
-              }}>Sign Out</button>
+              {uploadedB64 && (
+                <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"7px 12px",borderRadius:8,background:`${tint}18`,border:`1px solid ${tint}33`}}>
+                  <span style={{fontSize:12,color:"#cbd5e1"}}>{isVideo?"🎥":"🖼️"} {uploadedName}</span>
+                  <button onClick={removeUpload} style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",
+                    color:"#f87171",borderRadius:6,padding:"3px 9px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>Remove</button>
+                </div>
+              )}
+            </>
+          )}
+        </Panel>
+
+        {/* Visibility */}
+        <Panel tint={tint} title="👁️ Background Visibility">
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <Slider label="Opacity" value={bgOpacity} min={0} max={100} unit="%" tint={tint} onChange={setBgOpacity} bold/>
+            <Slider label="Brightness" value={bgBrightness} min={10} max={150} unit="%" tint={tint} onChange={setBgBrightness}/>
+            <Slider label="Saturation" value={bgSaturation} min={0} max={200} unit="%" tint="#60a5fa" onChange={setBgSaturation}/>
+            <Slider label="Blur" value={bgBlur} min={0} max={20} unit="px" tint="#a78bfa" onChange={setBgBlur}/>
+            <div>
+              <div style={{fontSize:12,color:"#64748b",marginBottom:5}}>Image Fit</div>
+              <div style={{display:"flex",gap:7}}>
+                {["cover","contain","tile"].map(f=>(
+                  <Pill key={f} active={bgFit===f} tint={tint} onClick={()=>setBgFit(f)}
+                    style={{flex:1,textAlign:"center",fontSize:12,textTransform:"capitalize"}}>{f}</Pill>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Panel>
+      </div>
+
+      {/* RIGHT */}
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+        {/* Tab Tint */}
+        <Panel tint={tint} title="🎨 Tab Tint Color">
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+            <div style={{position:"relative",width:48,height:48,borderRadius:10,overflow:"hidden",
+              border:`2px solid ${tint}`,boxShadow:`0 0 16px ${tint}55`,flexShrink:0}}>
+              <input type="color" value={tabTintColor} onChange={e=>setTabTintColor(e.target.value)}
+                style={{position:"absolute",inset:"-8px",width:"calc(100%+16px)",height:"calc(100%+16px)",
+                  cursor:"pointer",opacity:1,border:"none",padding:0}}/>
+            </div>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:"#e2e8f0"}}>Pick any color</div>
+              <div style={{fontSize:12,color:"#64748b",marginTop:2}}>Tints all tabs, borders & accents</div>
+              <div style={{fontSize:13,color:tint,fontWeight:800,marginTop:2,letterSpacing:1}}>{tabTintColor.toUpperCase()}</div>
+            </div>
+          </div>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>Quick Swatches</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {SWATCHES.map(c=>(
+                <button key={c} onClick={()=>setTabTintColor(c)} style={{width:26,height:26,borderRadius:6,
+                  background:c,cursor:"pointer",border:`2px solid ${tabTintColor===c?"#fff":"transparent"}`,
+                  boxShadow:tabTintColor===c?`0 0 8px ${c}88`:"none",transition:"all .15s"}}/>
+              ))}
+            </div>
+          </div>
+          <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:12,color:"#94a3b8",fontWeight:600}}>Tab Transparency</div>
+              <label style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer"}} onClick={()=>setUsePerApp(v=>!v)}>
+                <Toggle on={usePerApp} tint={tint}/>
+                <span style={{fontSize:11,color:usePerApp?tint:"#475569"}}>Per-app</span>
+              </label>
+            </div>
+            {!usePerApp ? (
+              <Slider label="All Tabs" value={tabOpacity} min={0} max={100} unit="%" tint={tint} onChange={setTabOpacity} bold/>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {TABS.map(a=>(
+                  <Slider key={a.id} label={`${a.icon} ${a.label}`}
+                    value={perAppOpacity[a.id]} min={0} max={100} unit="%"
+                    tint={tint} highlight={false}
+                    onChange={v=>setPerAppOpacity(p=>({...p,[a.id]:v}))}/>
+                ))}
+              </div>
+            )}
+          </div>
+        </Panel>
+
+        {/* Saved Schemes */}
+        <Panel tint={tint} title="💾 Saved Schemes">
+          <button onClick={saveCurrentScheme} style={{width:"100%",padding:"10px 0",borderRadius:8,
+            background:`linear-gradient(135deg,${tint},${tint}99)`,border:"none",color:"#fff",
+            fontSize:14,fontFamily:"inherit",fontWeight:700,cursor:"pointer",marginBottom:10,
+            boxShadow:`0 4px 16px ${tint}44`}}>
+            Save Current Scheme
+          </button>
+          {!unlocked && savedSchemes.length>=3 && (
+            <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginBottom:8}}>
+              🔒 3/3 free slots used —{" "}
+              <span style={{color:tint,cursor:"pointer",fontWeight:700}} onClick={()=>setShowUnlockModal(true)}>
+                unlock unlimited for $7
+              </span>
             </div>
           )}
+          {savedSchemes.length===0
+            ? <p style={{fontSize:12,color:"#475569",textAlign:"center",margin:0}}>No saved schemes yet.</p>
+            : savedSchemes.map(s=>(
+                <div key={s.id} style={{marginBottom:7,padding:"8px 12px",borderRadius:8,
+                  background:"rgba(255,255,255,0.03)",border:`1px solid ${s.tabTintColor||tint}33`,
+                  display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{width:9,height:9,borderRadius:"50%",background:s.tabTintColor||tint,flexShrink:0}}/>
+                      {s.label}
+                    </div>
+                    <div style={{fontSize:11,color:"#475569",marginTop:2}}>
+                      {s.bgMode==="upload"?s.uploadedName||"Photo":s.presetId} · bg {s.bgOpacity}% · tabs {s.tabOpacity}%
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <button onClick={()=>applyScheme(s)} style={{background:`${tint}22`,border:`1px solid ${tint}44`,
+                      color:tint,borderRadius:6,padding:"3px 9px",cursor:"pointer",fontSize:11,fontFamily:"inherit",fontWeight:700}}>Apply</button>
+                    <button onClick={()=>setSavedSchemes(p=>p.filter(x=>x.id!==s.id))}
+                      style={{background:"transparent",border:"none",color:"#475569",cursor:"pointer",fontSize:15}}>✕</button>
+                  </div>
+                </div>
+              ))
+          }
+        </Panel>
+
+        {/* Persist notice */}
+        <div style={{padding:"10px 14px",borderRadius:10,background:`${tint}0e`,
+          border:`1px solid ${tint}22`,fontSize:12,color:"#94a3b8",textAlign:"center"}}>
+          ✅ Your active scheme is <strong style={{color:tint}}>auto-saved</strong> and restores on next visit.
+          {" "}{!unlocked && <>Scheme slots: {savedSchemes.length}/3 free — <span style={{color:tint,cursor:"pointer"}} onClick={()=>setShowUnlockModal(true)}>unlock $7</span></>}
+          {unlocked && <span style={{color:"#22c55e"}}>🔓 Unlimited schemes active</span>}
         </div>
       </div>
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "36px 20px" }}>{children}</div>
     </div>
   );
 }
 
-// ─── TOOL GRID ───────────────────────────────────────────────────
-function ToolGrid({ tools, currentPlan, canUseTool, onSelect }) {
+// ─── COLOR & STYLE TAB ────────────────────────────────────────────────────────
+function ColorStyleTab(props) {
+  const { tint=props.tabTintColor, rgb, op } = { tint:props.tabTintColor, rgb:props.rgb, op:props.curTabOp };
   return (
     <div>
-      <h2 style={{ fontWeight: "normal", fontSize: 26, marginBottom: 6, color: "#fff" }}>Your Tools</h2>
-      <p style={{ color: "#555", marginBottom: 28, fontSize: 13 }}>Pick a tool and start generating.</p>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(255px,1fr))", gap: 16 }}>
-        {tools.map(tool => {
-          const unlocked = canUseTool(tool);
-          return (
-            <div key={tool.id} onClick={() => onSelect(tool)}
-              style={{
-                background: S.card, border: `1px solid ${unlocked ? S.border : "#111118"}`,
-                borderRadius: 16, padding: "24px 20px", cursor: "pointer",
-                opacity: unlocked ? 1 : 0.5, position: "relative", transition: "all 0.2s",
-              }}
-              onMouseEnter={e => { if (unlocked) { e.currentTarget.style.border = `1px solid ${tool.tagColor}44`; e.currentTarget.style.transform = "translateY(-3px)"; }}}
-              onMouseLeave={e => { e.currentTarget.style.border = `1px solid ${unlocked ? S.border : "#111118"}`; e.currentTarget.style.transform = "none"; }}
-            >
-              {!unlocked && <div style={{ position: "absolute", top: 14, right: 14, fontSize: 14 }}>🔒</div>}
-              <div style={{ fontSize: 28, marginBottom: 10 }}>{tool.icon}</div>
-              <div style={{
-                display: "inline-block", fontSize: 10, textTransform: "uppercase",
-                letterSpacing: "0.1em", color: tool.tagColor,
-                background: tool.tagColor + "15", border: `1px solid ${tool.tagColor}30`,
-                padding: "2px 8px", borderRadius: 20, marginBottom: 8,
-              }}>{tool.tag}</div>
-              <div style={{ fontWeight: "bold", color: "#fff", fontSize: 15, marginBottom: 6 }}>{tool.label}</div>
-              <p style={{ color: "#555", fontSize: 12, lineHeight: 1.6, margin: 0 }}>{tool.pitch}</p>
-              {!unlocked && <div style={{ marginTop: 10, fontSize: 11, color: tool.tagColor }}>Requires Starter plan</div>}
-            </div>
-          );
-        })}
-      </div>
+      <SectionHeader tint={tint} label="Color & Style" sub="Customize your platform's look — backgrounds, tab tints, and transparency."/>
+      <BgCustomizer {...props} tint={tint}/>
     </div>
   );
 }
 
-// ─── TOOL VIEW ───────────────────────────────────────────────────
-function ToolView({ tool, input, setInput, output, loading, onGenerate, onBack, plan, gensLeft }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => { navigator.clipboard?.writeText(output); setCopied(true); setTimeout(() => setCopied(false), 2000); };
-
+// ─── SETTINGS TAB ────────────────────────────────────────────────────────────
+function SettingsTab(props) {
+  const tint = props.tabTintColor;
+  const { unlocked, setUnlocked, setShowUnlockModal } = props;
   return (
     <div>
-      <button onClick={onBack} style={{ background: "none", border: "none", color: "#555", fontSize: 12, cursor: "pointer", marginBottom: 24, fontFamily: S.font }}>← All Tools</button>
-      <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 20, padding: "28px", marginBottom: 18 }}>
-        <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 18 }}>
-          <span style={{ fontSize: 30 }}>{tool.icon}</span>
-          <div>
-            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: tool.tagColor, marginBottom: 4 }}>{tool.tag}</div>
-            <h2 style={{ margin: 0, fontSize: 20, color: "#fff", fontWeight: "bold" }}>{tool.label}</h2>
-          </div>
-        </div>
-        <textarea
-          value={input} onChange={e => setInput(e.target.value)}
-          placeholder={tool.placeholder} rows={4}
-          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.7 }}
-          onFocus={e => e.target.style.border = `1px solid ${tool.tagColor}55`}
-          onBlur={e => e.target.style.border = "1px solid #1e1e30"}
-        />
-        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
-          <button onClick={onGenerate} disabled={loading || !input.trim()} style={{
-            flex: 1,
-            background: loading || !input.trim() ? "#151520" : "linear-gradient(135deg, #f59e0b, #ef4444)",
-            color: loading || !input.trim() ? "#333" : "#000",
-            border: "none", borderRadius: 10, padding: "13px",
-            fontSize: 14, fontWeight: "bold", cursor: loading || !input.trim() ? "not-allowed" : "pointer",
-            fontFamily: S.font, transition: "all 0.2s",
-          }}>{loading ? "✦ Generating..." : "✦ Generate"}</button>
-          <div style={{ fontSize: 11, color: "#444" }}>{plan.gens === Infinity ? "∞" : gensLeft} left</div>
-        </div>
-      </div>
-      {output && (
-        <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 20, padding: "26px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.14em", color: tool.tagColor }}>✦ Result</div>
-            <button onClick={handleCopy} style={{
-              background: "none", border: `1px solid ${S.border}`, color: copied ? tool.tagColor : "#555",
-              borderRadius: 8, padding: "5px 14px", fontSize: 11, cursor: "pointer", fontFamily: S.font,
-            }}>{copied ? "✓ Copied!" : "Copy"}</button>
-          </div>
-          <div style={{ color: "#ccc8bc", fontSize: 14, lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{output}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── UPGRADE MODAL ───────────────────────────────────────────────
-function UpgradeModal({ reason, plans, currentPlan, onSelect, onClose, checkoutLoading }) {
-  const upgradePlans = plans.filter(p => planIndex(p.id) > planIndex(currentPlan));
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
-      zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-    }}>
-      <div style={{
-        background: S.card, border: "1px solid #f59e0b33",
-        borderRadius: 24, padding: "32px 28px", maxWidth: 580, width: "100%",
-      }}>
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>⚡</div>
-          <h2 style={{ margin: "0 0 8px", color: "#fff", fontSize: 20, fontWeight: "normal" }}>Upgrade Your Plan</h2>
-          <p style={{ color: "#666", fontSize: 13, margin: 0 }}>{reason}</p>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px,1fr))", gap: 12 }}>
-          {upgradePlans.map(plan => (
-            <div key={plan.id} onClick={() => onSelect(plan.id)} style={{
-              background: "#13131e", border: `1px solid ${plan.color}44`,
-              borderRadius: 14, padding: "18px 14px", textAlign: "center", cursor: "pointer",
-            }}>
-              {plan.badge && <div style={{ fontSize: 9, color: plan.color, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>{plan.badge}</div>}
-              <div style={{ fontSize: 20, fontWeight: "bold", color: "#fff" }}>{plan.priceLabel}</div>
-              <div style={{ fontSize: 10, color: "#444" }}>{plan.period}</div>
-              <div style={{ color: plan.color, fontWeight: "bold", fontSize: 13, marginTop: 6 }}>{plan.name}</div>
-              <div style={{ color: "#444", fontSize: 10, marginTop: 4 }}>{plan.gens === Infinity ? "Unlimited" : plan.gens} gens</div>
-              {checkoutLoading === plan.id && <div style={{ color: plan.color, fontSize: 10, marginTop: 4 }}>Redirecting...</div>}
+      <SectionHeader tint={tint} label="Settings" sub="Manage preferences, background studio, and account options."/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
+        {/* Quick toggles */}
+        <Panel tint={tint} title="⚙️ App Preferences">
+          {[["Background transparency","Enabled"],["Media auto-preview","On"],["Show tier badges","On"],["Global letter color","Off"]].map(([label,val])=>(
+            <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+              <span style={{fontSize:13,color:"#cbd5e1"}}>{label}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:11,color:tint}}>{val}</span>
+                <div style={{width:32,height:18,borderRadius:9,background:`${tint}66`,cursor:"pointer"}}/>
+              </div>
             </div>
           ))}
-        </div>
-        <button onClick={onClose} style={{
-          display: "block", width: "100%", background: "none",
-          border: `1px solid ${S.border}`, color: "#444", borderRadius: 10,
-          padding: "10px", marginTop: 14, fontSize: 12, cursor: "pointer", fontFamily: S.font,
-        }}>Maybe later</button>
+        </Panel>
+        {/* Account */}
+        <Panel tint={tint} title="👤 Account">
+          <div style={{textAlign:"center",padding:"8px 0"}}>
+            <div style={{width:52,height:52,borderRadius:"50%",background:`${tint}33`,
+              border:`2px solid ${tint}`,margin:"0 auto 10px",display:"flex",alignItems:"center",
+              justifyContent:"center",fontSize:22}}>👤</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#e2e8f0"}}>Trial Account</div>
+            <div style={{fontSize:12,color:"#64748b",marginTop:2}}>7-day trial active · All tools unlocked</div>
+            <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
+              <button style={{padding:"8px 0",borderRadius:8,background:`${tint}22`,
+                border:`1px solid ${tint}44`,color:tint,cursor:"pointer",fontSize:13,fontFamily:"inherit",fontWeight:600}}>
+                Upgrade Plan
+              </button>
+              {!unlocked && (
+                <button onClick={()=>setShowUnlockModal(true)} style={{padding:"8px 0",borderRadius:8,
+                  background:"linear-gradient(135deg,#7c3aed,#4f46e5)",
+                  border:"none",color:"#fff",cursor:"pointer",fontSize:13,fontFamily:"inherit",fontWeight:700}}>
+                  🔓 Unlock Unlimited Edits — $7
+                </button>
+              )}
+              {unlocked && (
+                <div style={{fontSize:12,color:"#22c55e",fontWeight:600}}>🔓 Unlimited edits active</div>
+              )}
+            </div>
+          </div>
+        </Panel>
+      </div>
+
+      {/* Background Studio embedded in Settings */}
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:12,letterSpacing:3,color:tint,textTransform:"uppercase",marginBottom:8}}>Background Studio</div>
+      </div>
+      <BgCustomizer {...props} tint={tint}/>
+    </div>
+  );
+}
+
+// ─── MEDIA TAB ───────────────────────────────────────────────────────────────
+function MediaTab({tint,rgb,op}) {
+  const tools = [
+    {icon:"✂️",label:"Smart Clip & Trim",desc:"AI removes dead air automatically"},
+    {icon:"💬",label:"Auto Captions",desc:"Styled AI-generated subtitles"},
+    {icon:"🔄",label:"Loop & Reverse",desc:"Boomerang & rewind effects"},
+    {icon:"📱",label:"Reels Formatter",desc:"Auto-crop for any platform"},
+    {icon:"🎵",label:"Audio Sync",desc:"Beat-match & royalty-free tracks"},
+    {icon:"✨",label:"Scene Enhancement",desc:"AI lighting & color grading"},
+  ];
+  return (
+    <div>
+      <SectionHeader tint={tint} label="Media Editor" sub="All video and photo AI tools in one place."/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
+        {tools.map(t=>(
+          <div key={t.label} style={{padding:"18px 16px",borderRadius:12,
+            background:`rgba(${rgb},${op})`,border:`1px solid ${tint}33`,
+            backdropFilter:"blur(12px)",cursor:"pointer",transition:"all .2s",
+            boxShadow:`0 2px 12px ${tint}11`}}>
+            <div style={{fontSize:28,marginBottom:8}}>{t.icon}</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>{t.label}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>{t.desc}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-// ─── SETUP GUIDE ─────────────────────────────────────────────────
-function SetupGuide() {
-  const [open, setOpen] = useState(false);
+// ─── AI TOOLS TAB ─────────────────────────────────────────────────────────────
+function AIToolsTab({tint,rgb,op}) {
+  const tools=[
+    {icon:"💰",label:"Pricing Advisor",tier:"Free",desc:"Smart competitive pricing"},
+    {icon:"📧",label:"Cold Email Writer",tier:"Free",desc:"High-converting outreach"},
+    {icon:"📝",label:"Product Description",tier:"Free",desc:"SEO-optimized copy"},
+    {icon:"📣",label:"Ad Copy Generator",tier:"Pro",desc:"FB, Google & TikTok ads"},
+    {icon:"🎯",label:"Sales Funnel Builder",tier:"Pro",desc:"AI-mapped conversion funnels"},
+    {icon:"🔍",label:"Niche Finder",tier:"Elite",desc:"Trending products & demand"},
+    {icon:"🤖",label:"AI Business Coach",tier:"Max",desc:"Personalized strategy"},
+    {icon:"📈",label:"Revenue Forecaster",tier:"Max",desc:"AI-driven projections"},
+  ];
+  const tierColor = {"Free":"#22c55e","Pro":"#a78bfa","Elite":"#f59e0b","Max":"#ef4444"};
   return (
-    <div style={{ marginTop: 40, border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
-      <div onClick={() => setOpen(!open)} style={{
-        padding: "16px 20px", cursor: "pointer",
-        display: "flex", justifyContent: "space-between", alignItems: "center", background: S.card,
-      }}>
-        <span style={{ fontSize: 13, color: S.gold, fontWeight: "bold" }}>⚙️ Stripe Setup Guide (click to expand)</span>
-        <span style={{ color: "#444", fontSize: 12 }}>{open ? "▲" : "▼"}</span>
+    <div>
+      <SectionHeader tint={tint} label="AI Tools & Resources" sub="Every AI tool organized by tier. All unlimited during your trial."/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        {tools.map(t=>(
+          <div key={t.label} style={{padding:"14px",borderRadius:12,
+            background:`rgba(${rgb},${op})`,border:`1px solid ${tint}33`,backdropFilter:"blur(12px)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <span style={{fontSize:24}}>{t.icon}</span>
+              <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:5,
+                background:`${tierColor[t.tier]}22`,color:tierColor[t.tier],border:`1px solid ${tierColor[t.tier]}44`}}>
+                {t.tier}
+              </span>
+            </div>
+            <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>{t.label}</div>
+            <div style={{fontSize:11,color:"#64748b"}}>{t.desc}</div>
+          </div>
+        ))}
       </div>
-      {open && (
-        <div style={{ padding: "20px", background: "#0a0a12", fontSize: 13, color: "#777", lineHeight: 1.8 }}>
-          <div style={{ color: S.text, fontWeight: "bold", marginBottom: 12 }}>3 steps to activate real payments:</div>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: S.gold, marginBottom: 6 }}>Step 1 — Create Payment Links in Stripe</div>
-            Go to <strong style={{ color: "#aaa" }}>Stripe Dashboard → Payment Links → Create Link</strong><br />
-            Create one for each plan: Starter ($19/mo), Pro ($49/mo), Unlimited ($99/mo)
+    </div>
+  );
+}
+
+// ─── PLANS TAB ────────────────────────────────────────────────────────────────
+function PlansTab({tint,rgb,op}) {
+  const plans=[
+    {label:"Free",price:"$0",period:"/mo",features:["Pricing Advisor","5 Product Descriptions","3 Cold Emails","Custom color schemes"],popular:false},
+    {label:"Starter",price:"$9",period:"/mo",features:["All Free unlimited","Smart Clip & Trim","AI Photo Editor","Auto Captions"],popular:false},
+    {label:"Pro",price:"$27",period:"/mo",features:["Everything in Starter","Ad Copy Generator","Sales Funnel Builder","Social Caption Suite"],popular:true},
+    {label:"Elite",price:"$57",period:"/mo",features:["Everything in Pro","Niche Finder","Influencer Matchmaker","Store Audit AI"],popular:false},
+    {label:"Max",price:"$99",period:"/mo",features:["Everything in Elite","AI Business Coach","Revenue Forecaster","Full brand customization"],popular:false},
+  ];
+  return (
+    <div>
+      <SectionHeader tint={tint} label="Subscription Plans" sub="Five tiers built for every stage of your reseller journey."/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12}}>
+        {plans.map(p=>(
+          <div key={p.label} style={{padding:"18px 14px",borderRadius:14,position:"relative",
+            background:p.popular?`${tint}22`:`rgba(${rgb},${op})`,
+            border:`1.5px solid ${p.popular?tint:`${tint}22`}`,backdropFilter:"blur(12px)",
+            boxShadow:p.popular?`0 0 20px ${tint}33`:"none"}}>
+            {p.popular && <div style={{position:"absolute",top:-1,left:"50%",transform:"translateX(-50%)",
+              fontSize:10,fontWeight:800,padding:"2px 10px",borderRadius:"0 0 8px 8px",
+              background:tint,color:"#fff"}}>MOST POPULAR</div>}
+            <div style={{fontWeight:800,fontSize:16,color:"#e2e8f0",marginBottom:4,marginTop:p.popular?8:0}}>{p.label}</div>
+            <div style={{fontSize:24,fontWeight:800,color:p.popular?tint:"#e2e8f0"}}>{p.price}<span style={{fontSize:12,color:"#64748b",fontWeight:400}}>{p.period}</span></div>
+            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6}}>
+              {p.features.map(f=><div key={f} style={{fontSize:11,color:"#94a3b8",display:"flex",gap:5}}>
+                <span style={{color:tint}}>✓</span>{f}
+              </div>)}
+            </div>
+            <button style={{marginTop:14,width:"100%",padding:"8px 0",borderRadius:8,fontFamily:"inherit",fontWeight:700,
+              fontSize:12,cursor:"pointer",
+              background:p.popular?`linear-gradient(135deg,${tint},${tint}aa)`:"transparent",
+              border:`1px solid ${p.popular?tint:`${tint}44`}`,
+              color:p.popular?"#fff":tint}}>
+              {p.label==="Free"?"Get Started":"Select Plan"}
+            </button>
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: S.gold, marginBottom: 6 }}>Step 2 — Add your keys to the app code</div>
-            In the code, find <code style={{ background: "#1a1a2a", padding: "2px 6px", borderRadius: 4 }}>STRIPE_CONFIG</code> at the top and replace the placeholder values.
-          </div>
-          <div>
-            <div style={{ color: S.gold, marginBottom: 6 }}>Step 3 — Deploy your app</div>
-            Host on <strong style={{ color: "#aaa" }}>Vercel</strong> and update the <code style={{ background: "#1a1a2a", padding: "2px 6px", borderRadius: 4 }}>successUrl</code> to your live domain.
-          </div>
-        </div>
-      )}
+        ))}
+      </div>
+      <div style={{marginTop:16,textAlign:"center",fontSize:13,color:"#64748b"}}>
+        🎉 7-day free trial — everything unlimited, no credit card required
+      </div>
+    </div>
+  );
+}
+
+// ─── SMALL SHARED COMPONENTS ──────────────────────────────────────────────────
+function SectionHeader({tint,label,sub}) {
+  return (
+    <div style={{marginBottom:22}}>
+      <div style={{fontSize:11,letterSpacing:4,color:tint,textTransform:"uppercase",marginBottom:5}}>{label}</div>
+      <h2 style={{margin:0,fontSize:"clamp(20px,3vw,32px)",fontWeight:800,
+        background:`linear-gradient(135deg,#fff 40%,${tint})`,
+        WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>{label}</h2>
+      {sub && <p style={{color:"#64748b",fontSize:13,margin:"6px 0 0"}}>{sub}</p>}
+    </div>
+  );
+}
+
+function Panel({tint="#a78bfa",title,children}) {
+  return (
+    <div style={{background:"rgba(8,8,20,0.82)",backdropFilter:"blur(16px)",
+      border:`1px solid ${tint}20`,borderRadius:14,padding:"15px 16px"}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:11,letterSpacing:0.3}}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function Pill({active,tint,onClick,children,style={}}) {
+  return (
+    <button onClick={onClick} style={{padding:"7px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",
+      fontSize:13,fontWeight:700,border:`1.5px solid ${active?tint:"#2d2d4e"}`,
+      background:active?`${tint}22`:"rgba(255,255,255,0.03)",
+      color:active?"#fff":"#64748b",transition:"all .2s",...style}}>{children}</button>
+  );
+}
+
+function Slider({label,value,min,max,unit,onChange,tint="#a78bfa",bold=false,highlight=false}) {
+  const pct=((value-min)/(max-min))*100;
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+        <span style={{fontSize:12,color:bold||highlight?"#e2e8f0":"#64748b",fontWeight:bold||highlight?700:400}}>{label}</span>
+        <span style={{fontSize:12,color:tint,fontWeight:700}}>{value}{unit}</span>
+      </div>
+      <input type="range" min={min} max={max} value={value} onChange={e=>onChange(Number(e.target.value))}
+        style={{"--tc":tint,background:`linear-gradient(to right,${tint} ${pct}%,#2d2d4e ${pct}%)`}}/>
+    </div>
+  );
+}
+
+function Toggle({on,tint}) {
+  return (
+    <div style={{width:34,height:19,borderRadius:10,background:on?tint:"#2d2d4e",
+      position:"relative",transition:"background .2s",cursor:"pointer",flexShrink:0}}>
+      <div style={{position:"absolute",top:2,left:on?16:2,width:15,height:15,borderRadius:"50%",
+        background:"#fff",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,0.4)"}}/>
     </div>
   );
 }
