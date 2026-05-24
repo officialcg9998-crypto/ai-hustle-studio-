@@ -1,6 +1,63 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><!--
+=============================================================
+  INDEX.HTML ADDITIONS — paste these into your existing file
+=============================================================
+-->
+
+
+<!-- ══════════════════════════════════════════════════════
+     ADDITION 1 — Paste this INSIDE <head>, before </head>
+     ══════════════════════════════════════════════════════ -->
+<style>
+  :root {
+    --tint: #302b63;
+    --tint-rgb: 48,43,99;
+    --tab-op: 0.75;
+  }
+  #ahs-bg-layer {
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; overflow: hidden;
+  }
+  #ahs-bg-image {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    background-size: cover; background-position: center;
+    transition: opacity .3s, filter .3s;
+  }
+  #ahs-bg-overlay {
+    position: absolute; inset: 0;
+    background: rgba(2,2,10,0.42);
+  }
+</style>
+
+
+<!-- ══════════════════════════════════════════════════════
+     ADDITION 2 — Paste this RIGHT AFTER <body> opens
+     (before any other content in your body tag)
+     ══════════════════════════════════════════════════════ -->
+
+<!-- Supabase env vars — replace YOUR_PROJECT and your-anon-key -->
+<script>
+  window.__ENV = {
+    SUPABASE_URL: "https://YOUR_PROJECT.supabase.co",
+    SUPABASE_ANON_KEY: "your-anon-key-here"
+  };
+  // If you have user auth, expose the user ID here too:
+  // window.__AHS_USER_ID = "logged-in-user-id";
+</script>
+
+<!-- Background layer — sits behind everything else -->
+<div id="ahs-bg-layer">
+  <div id="ahs-bg-image"></div>
+  <div id="ahs-bg-overlay"></div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════
+     ADDITION 3 — Paste this right before </body>
+     ══════════════════════════════════════════════════════ -->
+<script type="module" src="src/bg-customizer.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Hustle Studio — AI-Powered Reseller Platform</title>
@@ -359,6 +416,16 @@ footer { border-top: 1px solid var(--border); padding: 48px 0 32px; }
 </style>
 </head>
 <body>
+<script>
+  window.__ENV = {
+    SUPABASE_URL: "https://YOUR_PROJECT.supabase.co",
+    SUPABASE_ANON_KEY: "your-anon-key-here"
+  };
+</script>
+<div id="ahs-bg-layer">
+  <div id="ahs-bg-image"></div>
+  <div id="ahs-bg-overlay"></div>
+</div>
 
 <!-- background orbs -->
 <div class="bg-orb orb1"></div>
@@ -1531,5 +1598,5 @@ function copyDemoOutput() {
   });
 }
 </script>
-</body>
+<script type="module" src="src/bg-customizer.js"></script></body>
 </html>
