@@ -14,7 +14,6 @@
     "@vitejs/plugin-react": "^4.0.0",
     "vite": "^4.4.0"
   }
-}
 {
   "name": "ai-hustle-studio",
   "private": true,
@@ -27,7 +26,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "firebase": "^10.0.0",
+    "firebase": "^10.0.0"
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
