@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const OWNER_EMAIL = "officialcg9998@gmail.com";
-const OWNER_PASS = "your-password-here";
+const OWNER_PASS = "1369Password!";
 
 export default function Login({ onLogin }) {
   const navigate = useNavigate();
@@ -15,7 +15,7 @@ export default function Login({ onLogin }) {
       setError("Please enter email and password");
       return;
     }
-    if (email === officialcg9998@gmail.com && 1369Password! === OWNER_PASS) {
+    if (email === OWNER_EMAIL && password === OWNER_PASS) {
       onLogin({ email, tier: "unlimited" });
       navigate("/dashboard");
     } else {
