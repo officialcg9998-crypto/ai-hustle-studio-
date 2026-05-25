@@ -164,8 +164,8 @@
       <a href="#subscriptions">Pricing</a>
     </div>
     <div class="nav-btns">
-      <button class="btn-ghost" onclick="window.open('https://project-3a5uk.vercel.app/','_blank')">Sign In</button>
-      <button class="btn-primary" onclick="window.open('https://project-3a5uk.vercel.app/','_blank')">Free Trial</button>
+     onclick="window.location.href='/login'">Sign In
+onclick="window.location.href='/dashboard'">Free Trial
     </div>
   </nav>
 
@@ -174,7 +174,7 @@
     <h1>Sell smarter.<br>Grow faster.<br>Create freely.</h1>
     <p>AI Hustle Studio combines AI-powered business tools, media editing, and full brand customization — all in one platform built for modern resellers.</p>
     <div class="hero-btns">
-      <button class="btn-primary" style="padding:12px 28px;font-size:15px;" onclick="window.open('https://project-3a5uk.vercel.app/','_blank')">Start Free — No Card Required →</button>
+      onclick="window.location.href='/dashboard'"
       <a href="#app" class="btn-ghost" style="padding:12px 28px;font-size:15px;text-decoration:none;display:inline-block;">Explore the App</a>
     </div>
     <div class="hero-stats">
@@ -406,8 +406,8 @@
 <div id="toast"></div>
 
 <script>
-const APP_URL     = 'https://project-3a5uk.vercel.app/';
-const PRICING_URL = 'https://project-3a5uk.vercel.app/#pricing';
+const APP_URL     = '/dashboard';
+const PRICING_URL = '/dashboard';
 
 const STRIPE_LINKS = {
   starter: 'https://buy.stripe.com/eVqeVc6S13cX24b1Xg7wA00',
